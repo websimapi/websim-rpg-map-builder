@@ -25,10 +25,24 @@ function App() {
     img.src = fullPrompt;
     document.body.appendChild(img);
 
+    // Wait a bit before starting to check
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     // Wait for the AI to generate and replace the src
+    let attempts = 0;
+    const maxAttempts = 70; // 7 seconds total (70 * 100ms)
+    
     const checkImage = setInterval(async () => {
       const currentImg = document.getElementById(imgId);
-      if (currentImg && currentImg.src !== fullPrompt) {
+      attempts++;
+      
+      if (!currentImg) {
+        clearInterval(checkImage);
+        console.error('Image element was removed unexpectedly');
+        return;
+      }
+
+      if (currentImg.src !== fullPrompt) {
         clearInterval(checkImage);
         
         try {
@@ -49,6 +63,10 @@ function App() {
         }
 
         // Cleanup
+        currentImg.remove();
+      } else if (attempts >= maxAttempts) {
+        clearInterval(checkImage);
+        console.error('Timeout waiting for image generation');
         currentImg.remove();
       }
     }, 100);
