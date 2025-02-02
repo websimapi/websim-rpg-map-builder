@@ -12,6 +12,9 @@ const generateTextureFromPrompt = async (texturePrompt, room) => {
   document.body.appendChild(img);
 
   try {
+    // Wait 7 seconds before starting to check for the image
+    await new Promise(resolve => setTimeout(resolve, 7000));
+
     // Wait for the AI to generate and replace the src
     await new Promise((resolve, reject) => {
       const checkImage = setInterval(() => {
@@ -39,6 +42,8 @@ const generateTextureFromPrompt = async (texturePrompt, room) => {
     return texture;
   } catch (error) {
     console.error('Error generating texture:', error);
+    const img = document.getElementById(imgId);
+    if (img) img.remove(); // Ensure cleanup even on error
     return null;
   }
 };
