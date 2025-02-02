@@ -5,6 +5,7 @@ function App() {
   const [texturePrompt, setTexturePrompt] = React.useState('');
   const [selectedTexture, setSelectedTexture] = React.useState(null);
   const [grid, setGrid] = React.useState({});
+  const [isGenerating, setIsGenerating] = React.useState(false);
   
   // Get textures from the database
   const textures = React.useSyncExternalStore(
@@ -13,63 +14,57 @@ function App() {
   );
 
   const generateTexture = async () => {
-    if (!texturePrompt.trim()) return;
+    if (!texturePrompt.trim() || isGenerating) return;
 
+    setIsGenerating(true);
     const fullPrompt = `RPG Tile Based Texture ${texturePrompt} RPG Tile Based Texture`;
-    const imgId = `img-${Date.now()}`;
+    const imgId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    // Create temporary image element
-    const img = document.createElement('img');
-    img.id = imgId;
-    img.alt = fullPrompt;
-    img.src = fullPrompt;
-    document.body.appendChild(img);
+    try {
+      // Create temporary image element
+      const img = document.createElement('img');
+      img.id = imgId;
+      img.alt = fullPrompt;
+      img.src = fullPrompt;
+      img.style.display = 'none';
+      document.body.appendChild(img);
 
-    // Wait a bit before starting to check
-    await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for the AI to generate and replace the src
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Texture generation timed out'));
+        }, 30000); // 30 second timeout
 
-    // Wait for the AI to generate and replace the src
-    let attempts = 0;
-    const maxAttempts = 70; // 7 seconds total (70 * 100ms)
-    
-    const checkImage = setInterval(async () => {
+        const checkImage = setInterval(async () => {
+          const currentImg = document.getElementById(imgId);
+          if (currentImg && currentImg.src !== fullPrompt) {
+            clearInterval(checkImage);
+            clearTimeout(timeout);
+            resolve(currentImg);
+          }
+        }, 100);
+      });
+
       const currentImg = document.getElementById(imgId);
-      attempts++;
-      
-      if (!currentImg) {
-        clearInterval(checkImage);
-        console.error('Image element was removed unexpectedly');
-        return;
-      }
+      // Upload to websim storage
+      const blobResponse = await fetch(currentImg.src);
+      const blob = await blobResponse.blob();
+      const url = await websim.upload(blob);
 
-      if (currentImg.src !== fullPrompt) {
-        clearInterval(checkImage);
-        
-        try {
-          // Upload to websim storage
-          const blobResponse = await fetch(currentImg.src);
-          const blob = await blobResponse.blob();
-          const url = await websim.upload(blob);
+      // Save to database
+      await room.collection('texture').create({
+        url,
+        prompt: texturePrompt
+      });
 
-          // Save to database
-          await room.collection('texture').create({
-            url,
-            prompt: texturePrompt
-          });
-
-          setTexturePrompt('');
-        } catch (error) {
-          console.error('Error saving texture:', error);
-        }
-
-        // Cleanup
-        currentImg.remove();
-      } else if (attempts >= maxAttempts) {
-        clearInterval(checkImage);
-        console.error('Timeout waiting for image generation');
-        currentImg.remove();
-      }
-    }, 100);
+      setTexturePrompt('');
+    } catch (error) {
+      console.error('Error generating texture:', error);
+      alert('Failed to generate texture. Please try again.');
+    } finally {
+      setIsGenerating(false);
+      document.getElementById(imgId)?.remove();
+    }
   };
 
   const handleCellClick = (x, y) => {
@@ -90,24 +85,35 @@ function App() {
     });
   };
 
+  const handleGridSizeChange = (dimension, value) => {
+    const newValue = Math.max(1, Math.min(50, parseInt(value) || 1));
+    setGridSize(prev => ({ ...prev, [dimension]: newValue }));
+  };
+
   return (
     <div>
       <div className="controls">
         <div className="grid-size-controls">
-          Width: 
-          <input 
-            type="number" 
-            value={gridSize.width} 
-            onChange={e => setGridSize(prev => ({ ...prev, width: parseInt(e.target.value) || 1 }))}
-            min="1"
-          />
-          Height: 
-          <input 
-            type="number" 
-            value={gridSize.height} 
-            onChange={e => setGridSize(prev => ({ ...prev, height: parseInt(e.target.value) || 1 }))}
-            min="1"
-          />
+          <label>
+            Width:
+            <input 
+              type="number"
+              value={gridSize.width}
+              onChange={e => handleGridSizeChange('width', e.target.value)}
+              min="1"
+              max="50"
+            />
+          </label>
+          <label>
+            Height:
+            <input 
+              type="number"
+              value={gridSize.height}
+              onChange={e => handleGridSizeChange('height', e.target.value)}
+              min="1"
+              max="50"
+            />
+          </label>
         </div>
 
         <div className="texture-generator">
@@ -115,9 +121,16 @@ function App() {
             type="text"
             value={texturePrompt}
             onChange={e => setTexturePrompt(e.target.value)}
-            placeholder="Enter texture description..."
+            placeholder="Enter texture description... (e.g., grass, stone wall, water)"
+            disabled={isGenerating}
           />
-          <button onClick={generateTexture}>Generate Texture</button>
+          <button 
+            onClick={generateTexture}
+            disabled={isGenerating}
+            className={isGenerating ? 'loading' : ''}
+          >
+            {isGenerating ? 'Generating...' : 'Generate Texture'}
+          </button>
         </div>
 
         <div className="texture-bank">
@@ -127,6 +140,7 @@ function App() {
               className={`texture ${selectedTexture?.id === texture.id ? 'selected' : ''}`}
               style={{ backgroundImage: `url(${texture.url})` }}
               onClick={() => setSelectedTexture(texture)}
+              title={texture.prompt}
             />
           ))}
         </div>
